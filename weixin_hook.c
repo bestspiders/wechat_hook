@@ -10,12 +10,12 @@
 
 //仿od断在入口
 //0050312B > $  E8 2E040000   call WeChat.0050355E
-#define call_point 0x50312B
+#define call_point 0x00039880
 //第一次断点
-#define break_point 0x7577F97B
-//第二次断点
-#define weixin_break 0x7577F9B0
-
+//#define break_point 0x7759F6C1   000364CC  |.  FFD1          call ecx                                 ;  WeChatWi.WechatLog
+#define break_point 0x364CC
+//第三次重复断点
+#define weixin_break 0x754BD630
 
 //全局调试句柄
 HANDLE g_hProcess = NULL;
@@ -50,7 +50,8 @@ int main() {
     BOOL waitEvent = TRUE;
     DEBUG_EVENT debugEvent;
     BYTE dwOldbyte[1] = {0};
-        //int 3断点
+    BYTE rd_buf[8]={0,0,0,0,0,0,0,0};
+    //int 3断点
     BYTE       int3[1] = {0xCC};
     //再次读取的内存
     BYTE ReadBuffer[MAX_PATH]={0};
@@ -59,32 +60,31 @@ int main() {
     //BYTE write_content[] = {0x11,0x23,0x45,0x67,0x85,0x00,0x43,0x00};
     BYTE raw_list[]={0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x30};
     srand((unsigned)time(NULL));
-    BYTE write_content[] = {0x11,0x23,0x45,raw_list[rand()%21],raw_list[rand()%21],raw_list[rand()%21],raw_list[rand()%21],raw_list[rand()%21]};
+    BYTE  write_content[] = {0x5F,0x00,0x57,raw_list[rand()%21],raw_list[rand()%21],raw_list[rand()%21],raw_list[rand()%21],raw_list[rand()%21]};
     DWORD wrtie_size = sizeof(write_content);
     //寄存器结构体
     CONTEXT Regs;
     Regs.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
-
+    int count_bp=1;
+    printf("count_bp:%d\n",count_bp);
     while (waitEvent == TRUE) {
         WaitForDebugEvent(&debugEvent, INFINITE);
         dwState = DBG_EXCEPTION_NOT_HANDLED;
         switch (debugEvent.dwDebugEventCode) {
-
             case CREATE_PROCESS_DEBUG_EVENT:
-                //OnProcessCreated(&debugEvent.u.CreateProcessInfo);
+//                OnProcessCreated(&debugEvent.u.CreateProcessInfo);
                 GetThreadContext(g_hThread,&Regs);
                 //断在入口处
                 ReadProcessMemory(g_hProcess,(LPCVOID)(call_point),&push_entrace,1,NULL);
                 WriteProcessMemory(g_hProcess,(LPVOID)call_point,&int3,1,NULL);
-                
                 dwState =DBG_CONTINUE;
                 printf("Debuggee was created.%x\n",Regs.Eip);
                 SetThreadContext(g_hThread,&Regs);
-                //printf("address:%x\n",&dwOldbyte);
+                printf("address:%x\n",&dwOldbyte);
                 break;
 
             case CREATE_THREAD_DEBUG_EVENT:
-                printf("create thread\n");
+                // printf("create thread\n");
 //                OnThreadCreated(&debugEvent.u.CreateThread);
                 break;
 
@@ -94,9 +94,9 @@ int main() {
                 {
                     case EXCEPTION_BREAKPOINT:
                     {
-                        printf("exception code\n");
+                        // printf("exception code\n");
                         GetThreadContext(g_hThread,&Regs);
-                        printf("%x\n",Regs.Eip);
+                        // printf("%x\n",Regs.Eip);
                         if(Regs.Eip==break_point+1){
                             Regs.Eip--;
                             //恢复之前在createMutex之前的断点
@@ -106,13 +106,20 @@ int main() {
                             WriteProcessMemory(g_hProcess,(LPVOID)weixin_break,&int3,1,NULL);
                             printf("break point\n");
                             SetThreadContext(g_hThread,&Regs);
+                            printf("Esi:%x\n",Regs.Esi);
                         }else if(Regs.Eip==weixin_break+1){
                             Regs.Eip--;
                             //恢复第二次断点
                             WriteProcessMemory(g_hProcess,(LPVOID)weixin_break,&dwOldbyte,1,0);
+                            printf("最后一次bp\n");
+                            ReadProcessMemory(g_hProcess,(LPCVOID)(Regs.Esi),&rd_buf,8,NULL);
+                            for (int i = 0; i < 8;i++)
+                            {
+                                printf("%02x ", rd_buf[i]);
+                            }
                             //写入变量存储的位置
                             WriteProcessMemory(g_hProcess,(LPVOID)Regs.Esi,write_content,wrtie_size,NULL);
-                            printf("Esi:%x",Regs.Esi);
+                            printf("\nEsi:%x\n",Regs.Esi);
                             SetThreadContext(g_hThread,&Regs);
                         }else if(Regs.Eip==call_point+1){
                             Regs.Eip--;
@@ -121,6 +128,7 @@ int main() {
                             printf("now it's entrace point.\n");
                             //断在createMutexW之前
                             ReadProcessMemory(g_hProcess,(LPCVOID)(break_point),&dwOldbyte,1,NULL);
+                            
                             WriteProcessMemory(g_hProcess,(LPVOID)break_point,&int3,1,NULL);
                             SetThreadContext(g_hThread,&Regs);
                         }
